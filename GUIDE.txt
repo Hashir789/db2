@@ -1,0 +1,441 @@
+TABLES
+
+USERS	DEEDS	DEED_ITEMS	SCALES	ENTRY	ENTRY_HISTORY	RELATIONS	PERMISSIONS	REFLECTION_MESSAGES	MERITS	MERIT_ITEMS	TARGETS	TARGET_ITEMS	MESSAGES	NOTIFICATIONS
+user_id	deeds_id	deed_item_id	scale_id	entry_id	entry_history_id	relation_id	permission_id	reflection_message_id	merit_id	merit_items_id	target_id	target_item_id	message_id	notification_id
+email	user_id	deed_id	deed_id	user_id	entry_id	requester_id	deed_item_id	user_id	user_id	merit_id	user_id	target_id	user_id	user_id
+password_hash	"category_type
+
+hasanaat
+saiyyiat"	name	name	deed_item_id	user_id	requestee_id	"permission_type
+
+read
+write"	"type
+
+hasanaat
+saiyyiaat"	title	deed_item_id	title	deed_item_id	"status
+
+sent
+delivered
+read
+none"	time
+full_name	created_at	description	description	entry_date	created_at	"status
+
+pending
+accepted
+rejected
+blocked"	is_active	message	description	count	description	count	"sender
+
+true"	created_at
+gender		level	display_order	scale_value		accepted_at	version	created_at	duration (in days)	scale	start_date	scale	created_at	
+date_of_birth		display_order	version	count_value			created_at	date	"type
+
+AND
+OR"	created_at	end_date	created_at		
+created_at		"hide_type
+
+none
+hide_from_all
+hide_from_graphs"	created_at	version					"category
+
+Positive
+Negative"		is_active			
+		created_at	deactivated_at	created_at					is_active					
+									created_at					
+
+
+The users table is 
+USERS
+user_id
+email
+password_hash
+full_name
+gender
+date_of_birth
+created_at
+
+The purpose of collecting gender and date of birth is not just identification, but also to help understand which age groups and genders are using Kitaab. This insight allows Kitaab to improve its features, design, and future decisions based on the types of users who benefit from the app.
+
+All user information is securely stored and used only to enhance the overall experience on Kitaab.
+
+=====
+
+DEEDS	DEED_ITEMS
+deeds_id	deed_item_id
+user_id	deed_id
+"category_type
+
+hasanaat
+saiyyiat"	name
+created_at	description
+	level
+	display_order
+	"hide_type
+
+none
+hide_from_all
+hide_from_graphs"
+	created_at
+
+
+
+### Deeds and Deed Items 
+
+In Kitaab, *deeds* represent the main actions a user wants to track. A deed acts like a *basic framework or category, while the actual details of that deed are organized inside it as **deed items*.
+
+Each deed belongs to a specific user and is classified into one of two categories:
+
+* *Hasanaat* – good deeds
+* *Saiyyiat* – bad deeds
+
+A deed on its own does not contain fine details. Instead, it works as a *skeleton, defining *what is being tracked, while the *deed items* explain how deeply that deed is broken down.
+
+---
+
+### Levels Inside a Deed
+
+Deed items are arranged in *levels*, allowing a deed to be structured step by step.
+
+For example, for the deed *Namaz*:
+
+* *Level 1:* Namaz
+* *Level 2:* Fajr
+* *Level 3:* 2 Sunnat, 2 Farz
+
+This layered approach allows users to record deeds in a *simple or detailed way*, depending on how deeply they want to track their actions.
+
+---
+
+### Visibility and Order
+
+Each deed item can be:
+
+* Shown normally
+* Hidden from everyone
+* Hidden only from charts and graphs
+
+This gives flexibility in deciding *what should be visible publicly* and *what should be used only for personal tracking*.
+
+Deed items also follow a specific display order, ensuring everything appears in a *clear and meaningful sequence* within the app.
+
+---
+
+### Purpose
+
+This structure helps Kitaab remain *flexible and personal*. Some users may only want to track major deeds, while others may prefer detailed breakdowns. Kitaab supports both, without forcing unnecessary complexity.
+
+=====
+
+SCALES
+scale_id
+deed_id
+name
+description
+display_order
+version
+created_at
+deactivated_at
+
+
+
+### Scales (How a Deed Is Measured)
+
+Not all deeds are recorded in the same way. In Kitaab, deeds can be tracked using *two different methods*:
+
+1. *Scale-based deeds*
+2. *Count-based deeds*
+
+This gives users flexibility to record actions in a way that feels natural and meaningful to them.
+
+---
+
+### Scale-Based Deeds
+
+Scale-based deeds are recorded by *choosing an option from a list*, rather than entering numbers.
+
+For example, *Namaz* can be recorded as:
+
+* *Yes*
+* *No*
+
+As a user becomes more consistent or wants better self-reflection, the same deed can later be tracked in more detail, such as:
+
+* *Prayed on time*
+* *Prayed late*
+* *Never prayed*
+
+Kitaab supports this evolution by allowing the scale to be *updated or refined over time*, without losing the original intent of the deed.
+
+---
+
+### Versions and Improvements Over Time
+
+Each scale has a *version*, which means:
+
+* Older ways of tracking remain part of history
+* Newer, improved scales can replace them going forward
+
+This allows Kitaab to grow *with the user*, instead of forcing them into a rigid system from day one.
+
+---
+
+### Order and Availability
+
+Scales are shown in a clear order so they are easy to use.
+If a scale is no longer needed, it can be safely deactivated without affecting past records.
+
+---
+
+### Purpose
+
+The scale system exists to make self-accountability *simple at first, and **more meaningful over time* — exactly how personal growth works.
+
+====
+
+RELATIONS relation_id requester_id requestee_id "status pending accepted rejected blocked" accepted_at PERMISSIONS permission_id deed_item_id "permission_type read write" is_active version created_at
+
+In Kitaab, connections between people are built in a *carefully controlled, one-way manner* to ensure privacy and clarity.
+
+When one person sends a connection request and the other accepts it, the relationship does *not* become mutual. The direction of the request matters. If Ahmad sends a request to Ali and Ali accepts it, the connection exists *from Ali to Ahmad only. This means **Ahmad may be granted access to Ali’s deeds*, but Ali does not receive any access to Ahmad’s records unless Ali separately sends a request of his own.
+
+Access is managed through *permissions*, which clearly define what a connected person is allowed to do. A person may be given:
+
+* *Read access*, allowing them to view a deed
+* *Write access*, allowing them to update or record a deed
+
+To maintain order and responsibility, Kitaab follows a strict rule for each deed:
+
+* *Only one person can have write (update) access*
+* *Any number of people can have read-only access*
+
+For example, one trusted person may be responsible for updating a deed, while multiple others—such as family members, teachers, or mentors—can observe progress without making changes.
+
+This system ensures that deeds remain accurate, accountability is clear, and the user always stays in full control of who can see or manage their personal records.
+
+
+
+=====
+
+
+REFLECTION_MESSAGES
+reflection_message_id
+user_id
+"type
+
+hasanaat
+saiyyiaat"
+message
+created_at
+date
+
+### Reflection Messages (Daily Self-Reflection)
+
+Kitaab is not only about recording actions, but also about *reflecting on them. For this purpose, Kitaab allows users to write **reflection messages*.
+
+Each day, a user can add:
+
+* *One reflection for Hasanaat (good deeds)*
+* *One reflection for Saiyyiaat (shortcomings or bad deeds)*
+
+These messages are short personal notes that help the user think about *what went well* and *what needs improvement* on that specific day.
+
+---
+
+### How It Works
+
+Reflection messages are tied to the same day as the deeds recorded.
+A Hasanaat reflection connects with good deeds performed that day, while a Saiyyiaat reflection relates to mistakes or missed actions.
+
+This creates a complete daily picture:
+
+* *What was done*
+* *How the user feels about it*
+* *What they want to improve*
+
+---
+
+### Purpose
+
+The goal of reflection messages is to encourage *honest self-accountability*, not judgment. Over time, these reflections help users notice patterns, grow spiritually, and build better habits.
+
+
+=======
+
+
+NOTIFICATIONS notification_id user_id time created_at
+
+### Notifications (Daily Reminders)
+
+To help users stay consistent, Kitaab provides *daily notifications*.
+
+A user can choose a *specific time of day* when they want to be reminded to fill in their records. At the selected time, Kitaab sends a gentle reminder to encourage the user to reflect on their day and update their deeds.
+
+---
+
+### How It Helps
+
+These reminders are not alerts or warnings. They are meant to act as:
+
+* A *nudge for consistency*
+* A moment for *daily self-check*
+* A way to build a *habit of reflection*
+
+---
+
+### Purpose
+
+By allowing users to set their own reminder time, Kitaab fits naturally into daily routines and helps ensure that record-keeping becomes a regular and meaningful practice rather than a forgotten task.
+
+
+=======
+
+MESSAGES message_id user_id "status sent delivered read none" "sender true" created_at
+
+
+
+### Messages (Support Chat)
+
+Kitaab provides a *direct chat system* so users can communicate with support for any suggestions, questions, or issues they encounter while using the app.
+
+Each message has a *status* that shows its progress:
+
+* *Sent* – the message has been submitted
+* *Delivered* – the message has reached the support team
+* *Read* – the support team has read the message
+* *None* – no status assigned yet
+
+Messages also indicate the *sender*, so it’s clear whether the message was sent by the user or the support team.
+
+---
+
+### How It Works
+
+Users can chat directly with *[support@kitaab.app](mailto:support@kitaab.app)* from within the app. This allows them to:
+
+* Report problems
+* Give feedback or suggestions
+* Ask questions about features or usage
+
+---
+
+### Purpose
+
+The messaging system ensures that *users are supported at every step*. It provides a quick and organized way to communicate, helping users feel heard and improving their experience with Kitaab.
+
+
+=====
+
+MERITS	MERIT_ITEMS
+merit_id	merit_items_id
+user_id	merit_id
+title	deed_item_id
+description	count
+duration (in days)	scale
+"type
+
+AND
+OR"	created_at
+"category
+
+Positive
+Negative"	
+is_active	
+created_at	
+also this
+
+### Merits and Merit Items (Achievements and Tracking)
+
+In Kitaab, *merits* represent *deed-specific achievements or progress markers*. They help users track how well they are performing on individual deeds, whether positive (good deeds) or negative (areas to improve).
+
+Each merit can have one or more *merit items*, which are smaller steps or measurable components of that specific deed.
+
+---
+
+### How They Work
+
+* *Deed-Specific:* Every merit is linked to a particular deed, ensuring progress is tracked in context.
+* *Title & Description:* Each merit has a clear name and explanation of what it measures.
+* *Count or Scale:* Some merits are tracked numerically (e.g., perform 5 Sunnat prayers), while others use a scale (e.g., Yes/No, or Prayed on time/Late/Never).
+* *Duration:* A merit can span a specific number of days.
+* *Type:* Merit items can be connected with *AND* (all items must be completed) or *OR* (any item can fulfill the merit).
+* *Category:* Each merit is classified as *Positive* (good deeds) or *Negative* (areas for improvement).
+
+---
+
+### Purpose
+
+Merits allow users to:
+
+* Track progress on specific deeds in a structured way
+* Break down deeds into smaller, measurable actions
+* Reflect on both achievements and areas needing improvement
+
+This makes self-accountability clear and actionable, while keeping everything *focused on individual deeds* rather than broader goals.
+
+=======
+
+TARGETS TARGET_ITEMS target_id target_item_id user_id target_id title deed_item_id description count start_date scale end_date created_at is_active
+
+
+### Targets and Target Items (Goals Across Deeds)
+
+In Kitaab, *targets* represent *personal goals* that a user wants to achieve over a period of time. Unlike merits, which are *specific to individual deeds, targets can **span multiple deeds*, allowing users to set broader objectives.
+
+Each target can have one or more *target items*, which are the actionable steps or measurable components needed to achieve the overall goal.
+
+---
+
+### How They Work
+
+* *Title & Description:* Each target has a clear name and explanation of what the goal is.
+* *Linked to Multiple Deeds:* Target items connect to specific deeds, allowing progress to be tracked across several actions.
+* *Count or Scale:* Targets can be tracked numerically (e.g., perform 20 Sunnat prayers in a month) or using a scale (e.g., Yes/No, or Prayed on time/Late/Never).
+* *Start and End Dates:* Targets have a defined period, helping users plan and measure progress.
+* *Active Status:* Targets can be marked as active or completed, ensuring focus on current goals.
+
+---
+
+### Purpose
+
+Targets help users:
+
+* Work toward broader goals involving multiple deeds
+* Track progress over time in a structured way
+* Stay motivated by seeing the bigger picture beyond individual deeds
+
+This system complements merits, allowing Kitaab to track *both deed-specific progress and larger personal goals*.
+
+=====
+
+TARGETS TARGET_ITEMS target_id target_item_id user_id target_id title deed_item_id description count start_date scale end_date created_at is_active
+
+
+### Targets and Target Items (Goals Across Deeds)
+
+In Kitaab, *targets* represent *personal goals* that a user wants to achieve over a period of time. Unlike merits, which are *specific to individual deeds, targets can **span multiple deeds*, allowing users to set broader objectives.
+
+Each target can have one or more *target items*, which are the actionable steps or measurable components needed to achieve the overall goal.
+
+---
+
+### How They Work
+
+* *Title & Description:* Each target has a clear name and explanation of what the goal is.
+* *Linked to Multiple Deeds:* Target items connect to specific deeds, allowing progress to be tracked across several actions.
+* *Count or Scale:* Targets can be tracked numerically (e.g., perform 20 Sunnat prayers in a month) or using a scale (e.g., Yes/No, or Prayed on time/Late/Never).
+* *Start and End Dates:* Targets have a defined period, helping users plan and measure progress.
+* *Active Status:* Targets can be marked as active or completed, ensuring focus on current goals.
+
+---
+
+### Purpose
+
+Targets help users:
+
+* Work toward broader goals involving multiple deeds
+* Track progress over time in a structured way
+* Stay motivated by seeing the bigger picture beyond individual deeds
+
+This system complements merits, allowing Kitaab to track *both deed-specific progress and larger personal goals*.
+
+====
+
