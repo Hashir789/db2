@@ -3,11 +3,6 @@
 ## Overview
 This document presents an enhanced, production-ready database schema for Kitaab, optimized for scalability, performance, data integrity, and future extensibility.
 
-**Space Optimization:** This schema is optimized for minimal storage:
-- **Hard deletes:** No `deleted_at` fields (use `DELETE` for permanent removal)
-- **No change tracking:** No `updated_at` fields (saves 8 bytes per row)
-- **Minimal overhead:** Only essential fields like `is_active` and `created_at` are kept
-
 ---
 
 ## Core Tables
@@ -16,37 +11,35 @@ This document presents an enhanced, production-ready database schema for Kitaab,
 **Purpose:** Store user account information and demographics.
 
 ```sql
-CREATE TYPE gender_enum AS ENUM ('male', 'female');
-
 CREATE TABLE users (
     user_id BIGSERIAL PRIMARY KEY,
     email VARCHAR(255) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(255) NOT NULL,
-    gender gender_enum,
+    gender VARCHAR(20) CHECK (gender IN ('male', 'female', 'other', 'prefer_not_to_say')),
     date_of_birth DATE,
     email_verified BOOLEAN DEFAULT FALSE,
-    two_factor_enabled BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT TRUE,
     last_login_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP WITH TIME ZONE
 );
 
 -- Indexes
-CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_email ON users(email) WHERE deleted_at IS NULL;
+CREATE INDEX idx_users_active ON users(is_active) WHERE deleted_at IS NULL;
 CREATE INDEX idx_users_created_at ON users(created_at);
--- Admin filtering indexes
-CREATE INDEX idx_users_gender ON users(gender);
-CREATE INDEX idx_users_date_of_birth ON users(date_of_birth);
-CREATE INDEX idx_users_gender_age ON users(gender, date_of_birth);
 ```
 
 **Key Improvements:**
 - Added `email_verified` for account security
-- Added `two_factor_enabled` for 2FA status tracking
+- Added `is_active` for account management
 - Added `last_login_at` for analytics
-- ENUM type for gender ensures data integrity
+- Added `updated_at` for audit trail
+- Added `deleted_at` for soft deletes
 - Unique constraint on email
-- Indexes on gender and date_of_birth for admin filtering and analytics
+- Partial indexes for active users only
 
 ---
 
@@ -60,16 +53,26 @@ CREATE TABLE deeds (
     deed_id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     category_type deed_category_type NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP WITH TIME ZONE,
+    CONSTRAINT unique_user_deed_name UNIQUE (user_id, name) WHERE deleted_at IS NULL
 );
 
 -- Indexes
-CREATE INDEX idx_deeds_user_id ON deeds(user_id);
-CREATE INDEX idx_deeds_category ON deeds(category_type, user_id);
+CREATE INDEX idx_deeds_user_id ON deeds(user_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_deeds_category ON deeds(category_type, user_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_deeds_active ON deeds(is_active, user_id) WHERE deleted_at IS NULL;
 ```
 
 **Key Improvements:**
 - Renamed `deeds_id` to `deed_id` for consistency
+- Added `is_active` for enabling/disabling deeds
+- Added `updated_at` and `deleted_at` for lifecycle management
+- Unique constraint on user + deed name combination
 - ENUM type for category_type ensures data integrity
 - Composite indexes for common query patterns
 
@@ -87,93 +90,32 @@ CREATE TABLE deed_items (
     parent_deed_item_id BIGINT REFERENCES deed_items(deed_item_id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
+    level INTEGER NOT NULL CHECK (level > 0),
     display_order INTEGER NOT NULL DEFAULT 0,
     hide_type hide_type_enum DEFAULT 'none',
+    is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT unique_deed_item_name_per_parent UNIQUE (deed_id, parent_deed_item_id, name),
-    CONSTRAINT unique_deed_item_display_order UNIQUE (deed_id, parent_deed_item_id, display_order) 
-        DEFERRABLE INITIALLY DEFERRED
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP WITH TIME ZONE,
+    CONSTRAINT valid_hierarchy CHECK (
+        (parent_deed_item_id IS NULL AND level = 1) OR
+        (parent_deed_item_id IS NOT NULL AND level > 1)
+    )
 );
 
-**3-Level Hierarchy:**
-The schema supports a 3-level hierarchy structure. Enforcement of the 3-level limit should be handled at the application level (frontend and backend API) for better user experience and flexibility. The database schema allows the hierarchy structure but does not enforce the limit.
-
 -- Indexes
--- Foreign key index for parent lookups (essential for hierarchical queries)
-CREATE INDEX idx_deed_items_parent ON deed_items(parent_deed_item_id);
--- Partial index for level 1 queries (parent IS NULL) - optimized for top-level item queries
-CREATE INDEX idx_deed_items_level1 ON deed_items(deed_id, display_order) WHERE parent_deed_item_id IS NULL;
--- Note: The UNIQUE constraint on (deed_id, parent_deed_item_id, display_order) automatically creates an index
+CREATE INDEX idx_deed_items_deed_id ON deed_items(deed_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_deed_items_parent ON deed_items(parent_deed_item_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_deed_items_level ON deed_items(deed_id, level, display_order) WHERE deleted_at IS NULL;
+CREATE INDEX idx_deed_items_active ON deed_items(is_active, deed_id) WHERE deleted_at IS NULL;
 ```
 
 **Key Improvements:**
 - Added `parent_deed_item_id` for explicit hierarchy (self-referencing)
-- Unique constraint prevents duplicate names under the same parent
-- Unique constraint prevents duplicate display_order within siblings
-- **DEFERRABLE constraint on display_order:** Allows temporary violations during transactions, enabling reordering operations (see Reordering Strategy below)
-- **3-Level Hierarchy:** Structure supports up to 3 levels (enforced at application level):
-  - Level 1: `parent_deed_item_id IS NULL`
-  - Level 2: Parent is a level 1 item
-  - Level 3: Parent is a level 2 item (grandparent is level 1)
-  - Level 4+: Should be prevented by frontend/backend validation (see implementation examples above)
-- **Index Strategy:** 
-  - The UNIQUE constraint on `(deed_id, parent_deed_item_id, display_order)` automatically creates an index that covers queries filtering by these columns
-  - Only `parent_deed_item_id` needs a separate index for efficient "get children" queries
-  - Additional indexes on `deed_id` or partial indexes are optional and should be added based on actual query patterns
+- Added `is_active` for item management
+- Added constraint to validate hierarchy structure
+- Composite index on (deed_id, level, display_order) for efficient tree traversal
 - Proper foreign key with CASCADE for data integrity
-- **Note:** Level is calculated from parent_deed_item_id (level 1 = NULL parent, level 2+ = traverse up tree)
-
-**Reordering Strategy:**
-The `DEFERRABLE INITIALLY DEFERRED` constraint on `display_order` allows you to temporarily violate the unique constraint within a transaction, making reordering possible:
-
-```sql
--- Example: Swap display_order of two items
-BEGIN;
-
--- Step 1: Move item A to a temporary position (e.g., -1 or very high number)
-UPDATE deed_items 
-SET display_order = -1 
-WHERE deed_item_id = 100 AND display_order = 1;
-
--- Step 2: Move item B to item A's original position
-UPDATE deed_items 
-SET display_order = 1 
-WHERE deed_item_id = 200 AND display_order = 2;
-
--- Step 3: Move item A to item B's original position
-UPDATE deed_items 
-SET display_order = 2 
-WHERE deed_item_id = 100 AND display_order = -1;
-
--- Step 4: Commit - constraint is checked at end of transaction
-COMMIT;
-```
-
-**Index Analysis:**
-The unique constraint `UNIQUE (deed_id, parent_deed_item_id, display_order)` automatically creates an index that PostgreSQL can use for:
-- Queries filtering by `deed_id` and `parent_deed_item_id` and ordering by `display_order`
-- Enforcing the uniqueness constraint
-
-**Index Strategy:**
-- **Essential:** `idx_deed_items_parent` is needed for hierarchical queries like "get all children of item X"
-- **Optimized:** `idx_deed_items_level1` is a partial index for level 1 queries (top-level items), which are common when displaying deed hierarchies
-- **Redundant:** A separate composite index on `(deed_id, parent_deed_item_id, display_order)` is redundant because the unique constraint already provides this index
-
-**Query Pattern Examples:**
-```sql
--- Uses idx_deed_items_parent (efficient)
-SELECT * FROM deed_items WHERE parent_deed_item_id = 123 ORDER BY display_order;
-
--- Uses unique constraint's index (efficient)
-SELECT * FROM deed_items 
-WHERE deed_id = 456 AND parent_deed_item_id = 789 
-ORDER BY display_order;
-
--- Uses idx_deed_items_level1 (efficient partial index)
-SELECT * FROM deed_items 
-WHERE deed_id = 456 AND parent_deed_item_id IS NULL 
-ORDER BY display_order;
-```
 
 ---
 
@@ -184,6 +126,9 @@ ORDER BY display_order;
 CREATE TABLE scales (
     scale_id BIGSERIAL PRIMARY KEY,
     deed_id BIGINT NOT NULL REFERENCES deeds(deed_id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    display_order INTEGER NOT NULL DEFAULT 0,
     version INTEGER NOT NULL DEFAULT 1,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -200,7 +145,6 @@ CREATE INDEX idx_scales_active_version ON scales(deed_id, is_active, version DES
 - Replaced `deactivated_at` with `is_active` flag for better query performance
 - Kept `deactivated_at` for audit trail
 - Unique constraint on (deed_id, version) prevents duplicate versions
-- Removed `name`, `description`, and `display_order` (moved to `scale_values` table where they belong)
 - Indexes optimized for active scale lookups
 
 ---
@@ -212,20 +156,21 @@ CREATE INDEX idx_scales_active_version ON scales(deed_id, is_active, version DES
 CREATE TABLE scale_values (
     scale_value_id BIGSERIAL PRIMARY KEY,
     scale_id BIGINT NOT NULL REFERENCES scales(scale_id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    display_order INTEGER NOT NULL DEFAULT 0,
+    value_name VARCHAR(255) NOT NULL,
+    value_order INTEGER NOT NULL DEFAULT 0,
+    numeric_value DECIMAL(10,2), -- Optional: for weighted scales
+    is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes
-CREATE INDEX idx_scale_values_scale_id ON scale_values(scale_id, display_order);
+CREATE INDEX idx_scale_values_scale_id ON scale_values(scale_id, value_order) WHERE is_active = TRUE;
 ```
 
 **Key Improvements:**
 - **New table** to normalize scale options
-- Each scale value has its own `name` and `description` (moved from `scales` table)
 - Allows multiple values per scale (Yes/No, Excellent/Good/Fair/Poor, etc.)
+- Supports weighted scales via `numeric_value`
 - Enables easier scale management and updates
 
 ---
@@ -239,13 +184,15 @@ CREATE TABLE entries (
     user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     deed_item_id BIGINT NOT NULL REFERENCES deed_items(deed_item_id) ON DELETE RESTRICT,
     entry_date DATE NOT NULL,
+    scale_id BIGINT REFERENCES scales(scale_id) ON DELETE SET NULL,
     scale_value_id BIGINT REFERENCES scale_values(scale_value_id) ON DELETE SET NULL,
-    count_value DECIMAL(15,2), -- For count-based entries (supports values up to millions/thousands)
+    count_value DECIMAL(10,2), -- For count-based entries
+    notes TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by_user_id BIGINT REFERENCES users(user_id), -- For permission-based entries
     CONSTRAINT entry_has_value CHECK (
-        (scale_value_id IS NOT NULL AND count_value IS NULL) OR 
-        (scale_value_id IS NULL AND count_value IS NOT NULL)
+        (scale_value_id IS NOT NULL) OR (count_value IS NOT NULL)
     ),
     CONSTRAINT unique_user_deed_item_date UNIQUE (user_id, deed_item_id, entry_date)
 );
@@ -259,11 +206,10 @@ CREATE INDEX idx_entries_created_by ON entries(created_by_user_id) WHERE created
 
 **Key Improvements:**
 - Added `scale_value_id` reference to normalized scale values
+- Added `notes` field for user annotations
 - Added `created_by_user_id` to track permission-based entries
 - Unique constraint prevents duplicate entries per day
-- CHECK constraint ensures exactly one of `scale_value_id` or `count_value` is NOT NULL (mutually exclusive)
-- `count_value` supports large numbers (up to millions/thousands) with DECIMAL(15,2)
-- Removed redundant `scale_id` (scale can be determined via `scale_value_id` → `scale_values` → `scales`)
+- CHECK constraint ensures either scale or count value exists
 - Time-based partial index for recent entries (performance optimization)
 - Composite indexes for dashboard queries
 
@@ -273,34 +219,28 @@ CREATE INDEX idx_entries_created_by ON entries(created_by_user_id) WHERE created
 **Purpose:** Track all changes to entries for audit trail.
 
 ```sql
-CREATE TYPE change_type_enum AS ENUM ('created', 'updated');
-
 CREATE TABLE entry_history (
     entry_history_id BIGSERIAL PRIMARY KEY,
     entry_id BIGINT NOT NULL REFERENCES entries(entry_id) ON DELETE CASCADE,
     user_id BIGINT NOT NULL REFERENCES users(user_id),
     scale_value_id BIGINT REFERENCES scale_values(scale_value_id),
-    count_value DECIMAL(15,2),
-    change_type change_type_enum NOT NULL,
+    count_value DECIMAL(10,2),
+    notes TEXT,
+    change_type VARCHAR(50) NOT NULL CHECK (change_type IN ('created', 'updated', 'deleted')),
     changed_by_user_id BIGINT REFERENCES users(user_id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes
--- Composite index for querying history of a specific entry by a specific user (most common pattern)
-CREATE INDEX idx_entry_history_entry_user ON entry_history(entry_id, user_id, created_at DESC);
--- Index for querying all history of a specific user
+CREATE INDEX idx_entry_history_entry_id ON entry_history(entry_id, created_at DESC);
 CREATE INDEX idx_entry_history_user_id ON entry_history(user_id, created_at DESC);
--- Index for date-range queries and general audit logs
 CREATE INDEX idx_entry_history_date ON entry_history(created_at DESC);
 ```
 
 **Key Improvements:**
-- ENUM type for change_type ensures data integrity (only 'created' and 'updated' - entries cannot be deleted)
+- Added `change_type` to distinguish create/update/delete
 - Added `changed_by_user_id` for permission tracking
-- Removed `notes` field (not needed in history)
-- **Optimized indexes:** Composite index on `(entry_id, user_id, created_at DESC)` for efficient queries filtering by both entry and user
-- Additional indexes support entry-only, user-only, and date-range queries
+- Indexes optimized for audit queries and user history
 
 ---
 
@@ -317,39 +257,23 @@ CREATE TABLE relations (
     status relation_status_enum NOT NULL DEFAULT 'pending',
     accepted_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT no_self_relation CHECK (requester_id != requestee_id),
     CONSTRAINT unique_relation UNIQUE (requester_id, requestee_id)
 );
 
--- Indexes for bidirectional lookups
--- Who requested (find all relations where user is the requester)
+-- Indexes
 CREATE INDEX idx_relations_requester ON relations(requester_id, status);
-CREATE INDEX idx_relations_requester_id ON relations(requester_id) WHERE status IN ('pending', 'accepted');
--- Who received (find all relations where user is the requestee)
 CREATE INDEX idx_relations_requestee ON relations(requestee_id, status);
-CREATE INDEX idx_relations_requestee_id ON relations(requestee_id) WHERE status IN ('pending', 'accepted');
--- Bidirectional lookup: find all relations involving a user (as requester OR requestee)
--- Note: Use UNION query with both indexes above for optimal performance
--- Accepted connections lookup (for permission checks)
 CREATE INDEX idx_relations_accepted ON relations(requester_id, requestee_id) WHERE status = 'accepted';
-CREATE INDEX idx_relations_accepted_reverse ON relations(requestee_id, requester_id) WHERE status = 'accepted';
 ```
 
 **Key Improvements:**
 - ENUM type for status ensures data integrity
 - CHECK constraint prevents self-relations
 - Unique constraint prevents duplicate requests
-- **Comprehensive indexes for bidirectional lookups:**
-  - `idx_relations_requester` and `idx_relations_requester_id`: Find all relations where user is the requester (who they requested)
-  - `idx_relations_requestee` and `idx_relations_requestee_id`: Find all relations where user is the requestee (who requested them)
-  - `idx_relations_accepted` and `idx_relations_accepted_reverse`: Fast lookups for accepted connections in both directions
-- Partial indexes filter out rejected/blocked statuses for common queries
-- **Bidirectional Query Pattern:** To find all relations involving a user (as requester OR requestee), use UNION:
-  ```sql
-  SELECT * FROM relations WHERE requester_id = :user_id
-  UNION
-  SELECT * FROM relations WHERE requestee_id = :user_id;
-  ```
+- Indexes for bidirectional lookups (who requested, who received)
+- Partial index for active connections only
 
 ---
 
@@ -367,6 +291,7 @@ CREATE TABLE permissions (
     is_active BOOLEAN DEFAULT TRUE,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT unique_permission UNIQUE (relation_id, deed_item_id, permission_type, version)
 );
 
@@ -398,20 +323,20 @@ CREATE TABLE reflection_messages (
     message TEXT NOT NULL,
     reflection_date DATE NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT unique_user_reflection_date_type UNIQUE (user_id, reflection_date, type)
 );
 
 -- Indexes
--- Note: The UNIQUE constraint automatically creates an index on (user_id, reflection_date, type)
--- If queries frequently filter by (user_id, type) and order by reflection_date DESC, consider:
--- CREATE INDEX idx_reflection_user_type_date ON reflection_messages(user_id, type, reflection_date DESC);
+CREATE INDEX idx_reflection_user_date ON reflection_messages(user_id, reflection_date DESC);
+CREATE INDEX idx_reflection_type_date ON reflection_messages(type, reflection_date DESC);
 ```
 
 **Key Improvements:**
 - Renamed `date` to `reflection_date` for clarity
 - ENUM type for reflection type
 - Unique constraint ensures one reflection per type per day
-- **Note:** The UNIQUE constraint automatically creates an index on `(user_id, reflection_date, type)`. If your query pattern frequently filters by `(user_id, type)` and orders by `reflection_date DESC`, consider adding a separate index with that column order for optimal performance.
+- Indexes for user history and analytics
 
 ---
 
@@ -424,18 +349,23 @@ CREATE TABLE notifications (
     user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     notification_time TIME NOT NULL, -- Time of day for reminder
     timezone VARCHAR(50) DEFAULT 'UTC',
+    is_active BOOLEAN DEFAULT TRUE,
+    notification_type VARCHAR(50) DEFAULT 'daily_reminder',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT one_notification_per_user UNIQUE (user_id)
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT one_active_notification_per_user UNIQUE (user_id) WHERE is_active = TRUE
 );
 
 -- Indexes
-CREATE INDEX idx_notifications_time ON notifications(notification_time, timezone);
+CREATE INDEX idx_notifications_user_active ON notifications(user_id, is_active);
+CREATE INDEX idx_notifications_time ON notifications(notification_time, timezone) WHERE is_active = TRUE;
 ```
 
 **Key Improvements:**
 - Added `timezone` for accurate scheduling
-- Unique constraint ensures one notification per user
-- Index on notification_time and timezone for scheduling queries
+- Added `notification_type` for extensibility (daily, weekly, custom)
+- Unique constraint ensures one active notification per user
+- Partial index for active notifications only
 
 ---
 
@@ -453,6 +383,7 @@ CREATE TABLE messages (
     status message_status_enum DEFAULT 'none',
     is_from_user BOOLEAN NOT NULL DEFAULT TRUE, -- TRUE = from user, FALSE = from support
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     read_at TIMESTAMP WITH TIME ZONE
 );
 
@@ -489,6 +420,7 @@ CREATE TABLE merits (
     category merit_category_enum NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP WITH TIME ZONE
 );
 
@@ -549,6 +481,7 @@ CREATE TABLE targets (
     end_date DATE,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP WITH TIME ZONE,
     CONSTRAINT valid_date_range CHECK (end_date IS NULL OR end_date >= start_date)
 );
@@ -610,7 +543,8 @@ CREATE TABLE user_preferences (
     theme VARCHAR(20) DEFAULT 'light',
     email_notifications_enabled BOOLEAN DEFAULT TRUE,
     push_notifications_enabled BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_user_preferences_user ON user_preferences(user_id);
@@ -649,9 +583,7 @@ CREATE INDEX idx_audit_date ON audit_log(created_at DESC);
 - **Foreign Keys:** All relationships properly defined with CASCADE/RESTRICT rules
 - **CHECK Constraints:** Validate data at database level (dates, values, hierarchy)
 - **UNIQUE Constraints:** Prevent duplicates (entries, reflections, relations)
-- **ENUM Types:** Consistent use of ENUM types for all fixed-value fields (gender, status, category, type, etc.)
-  - **Benefits:** More efficient storage (4 bytes vs variable VARCHAR), better type safety, improved query performance
-  - **Usage:** All status fields, categories, and fixed-value types use ENUMs instead of CHECK constraints
+- **ENUM Types:** Ensure only valid values for categories, statuses, types
 
 ### 2. **Performance Optimization**
 - **Strategic Indexes:** Composite indexes for common query patterns
@@ -660,13 +592,14 @@ CREATE INDEX idx_audit_date ON audit_log(created_at DESC);
 - **Foreign Key Indexes:** All foreign keys indexed for join performance
 
 ### 3. **Scalability Enhancements**
-- **Hard Deletes:** Use `DELETE` statements for permanent removal (saves space)
+- **Soft Deletes:** `deleted_at` timestamps instead of hard deletes
 - **Versioning:** Scales and permissions support versioning
 - **Partitioning Ready:** Entry tables structured for future date-based partitioning
 - **Normalized Scale Values:** New `scale_values` table for better scale management
 
 ### 4. **Flexibility & Extensibility**
-- **Metadata Fields:** `description` fields for future use
+- **Metadata Fields:** `notes`, `description` fields for future use
+- **Type Fields:** `notification_type` allows multiple notification types
 - **Thread Support:** Messages table supports conversation threading
 - **User Preferences:** New table for extensible user settings
 - **Audit Log:** System-wide audit trail for compliance
@@ -714,68 +647,6 @@ CREATE TABLE entries_2025 PARTITION OF entries
 4. **Analytics:** Consider materialized views for aggregated statistics
 5. **Full-Text Search:** Add GIN indexes on TEXT fields if search is needed
 
-### Display Order Reordering Best Practices
-
-When reordering `deed_items` with the DEFERRABLE constraint, use these patterns:
-
-**Pattern 1: Swap Two Adjacent Items**
-```sql
-BEGIN;
-UPDATE deed_items SET display_order = -1 WHERE deed_item_id = :item_a_id;
-UPDATE deed_items SET display_order = :old_order_a WHERE deed_item_id = :item_b_id;
-UPDATE deed_items SET display_order = :old_order_b WHERE deed_item_id = :item_a_id;
-COMMIT;
-```
-
-**Pattern 2: Move Item to New Position (with renumbering)**
-```sql
-BEGIN;
--- Move target item to temporary position
-UPDATE deed_items SET display_order = -1 WHERE deed_item_id = :target_id;
--- Shift items in the range
-UPDATE deed_items 
-SET display_order = display_order + 1 
-WHERE deed_id = :deed_id 
-  AND parent_deed_item_id = :parent_id 
-  AND display_order >= :new_position
-  AND display_order < :old_position;
--- Place target at new position
-UPDATE deed_items SET display_order = :new_position WHERE deed_item_id = :target_id;
-COMMIT;
-```
-
-**Pattern 3: Batch Reordering (Python Example)**
-```python
-def reorder_deed_items(connection, deed_id, parent_id, new_order_list):
-    """
-    Reorder deed items efficiently.
-    new_order_list: List of (deed_item_id, new_display_order) tuples
-    """
-    with connection.cursor() as cur:
-        cur.execute("BEGIN")
-        try:
-            # Use temporary negative values to avoid conflicts
-            for idx, (item_id, new_order) in enumerate(new_order_list):
-                cur.execute(
-                    "UPDATE deed_items SET display_order = %s WHERE deed_item_id = %s",
-                    (-1000 - idx, item_id)
-                )
-            
-            # Now assign final values
-            for item_id, new_order in new_order_list:
-                cur.execute(
-                    "UPDATE deed_items SET display_order = %s WHERE deed_item_id = %s",
-                    (new_order, item_id)
-                )
-            
-            cur.execute("COMMIT")
-        except Exception as e:
-            cur.execute("ROLLBACK")
-            raise
-```
-
-**Performance Note:** The DEFERRABLE constraint allows all updates to happen in a single transaction without constraint violations, making reordering operations atomic and efficient.
-
 ---
 
 ## Migration Notes
@@ -785,12 +656,8 @@ When migrating from the original schema:
 2. Create `scale_values` table and populate from existing scale data
 3. Add `parent_deed_item_id` to deed_items (may require data migration)
 4. Update ENTRY table to use `scale_value_id` instead of `scale_value` string
-5. Convert string enums to ENUM types
-
-**Note:** This schema is optimized for minimal storage:
-- **Hard deletes:** No `deleted_at` fields (use `DELETE` for permanent removal)
-- **No change tracking:** No `updated_at` fields (use `is_active = FALSE` for temporary disabling)
-- **Minimal overhead:** Only essential fields like `is_active` and `created_at` are kept
+5. Add missing timestamp fields (`updated_at`, `deleted_at`)
+6. Convert string enums to ENUM types
 
 ---
 
