@@ -365,9 +365,8 @@ CREATE TABLE permissions (
     deed_item_id BIGINT NOT NULL REFERENCES deed_items(deed_item_id) ON DELETE CASCADE,
     permission_type permission_type_enum NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
-    version INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT unique_permission UNIQUE (relation_id, deed_item_id, permission_type, version)
+    CONSTRAINT unique_permission UNIQUE (relation_id, deed_item_id, permission_type)
 );
 
 -- Indexes
@@ -378,7 +377,6 @@ CREATE INDEX idx_permissions_type ON permissions(permission_type, deed_item_id) 
 
 **Key Improvements:**
 - ENUM type for permission_type
-- Version tracking for permission history
 - Unique constraint prevents duplicate permissions
 - Composite indexes for permission checks
 - Links to `relation_id` instead of direct user references (better normalization)
@@ -421,11 +419,10 @@ CREATE TABLE reflection_messages (
 ```sql
 CREATE TABLE notifications (
     notification_id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE UNIQUE,
     notification_time TIME NOT NULL, -- Time of day for reminder
     timezone VARCHAR(50) DEFAULT 'UTC',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT one_notification_per_user UNIQUE (user_id)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes
@@ -448,24 +445,19 @@ CREATE TYPE message_status_enum AS ENUM ('sent', 'delivered', 'read', 'none');
 CREATE TABLE messages (
     message_id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    thread_id BIGINT, -- For grouping related messages
     content TEXT NOT NULL,
     status message_status_enum DEFAULT 'none',
     is_from_user BOOLEAN NOT NULL DEFAULT TRUE, -- TRUE = from user, FALSE = from support
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    read_at TIMESTAMP WITH TIME ZONE
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes
 CREATE INDEX idx_messages_user ON messages(user_id, created_at DESC);
-CREATE INDEX idx_messages_thread ON messages(thread_id, created_at DESC) WHERE thread_id IS NOT NULL;
 CREATE INDEX idx_messages_status ON messages(status, user_id) WHERE status != 'read';
 ```
 
 **Key Improvements:**
 - Renamed `sender` to `is_from_user` (boolean, clearer)
-- Added `thread_id` for conversation grouping
-- Added `read_at` timestamp for precise read tracking
 - ENUM type for status
 - Indexes for conversation views and unread messages
 
@@ -487,9 +479,10 @@ CREATE TABLE merits (
     duration_days INTEGER CHECK (duration_days > 0),
     type merit_type_enum NOT NULL DEFAULT 'AND',
     category merit_category_enum NOT NULL,
+    end_date DATE,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP WITH TIME ZONE
+    CONSTRAINT merit_end_date_when_inactive CHECK (is_active = TRUE OR end_date IS NOT NULL)
 );
 
 -- Indexes
@@ -500,7 +493,8 @@ CREATE INDEX idx_merits_category ON merits(category, user_id) WHERE is_active = 
 
 **Key Improvements:**
 - Renamed `duration (in days)` to `duration_days` (SQL-friendly)
-- Added `completed_at` for tracking achievement dates
+- Added `end_date` for tracking merit completion
+- CHECK constraint ensures `end_date` is set when `is_active = FALSE`
 - ENUM types for category and type
 - Indexes for user progress tracking
 
@@ -516,7 +510,6 @@ CREATE TABLE merit_items (
     deed_item_id BIGINT NOT NULL REFERENCES deed_items(deed_item_id) ON DELETE RESTRICT,
     count DECIMAL(10,2), -- Target count
     scale_value_id BIGINT REFERENCES scale_values(scale_value_id), -- Target scale value
-    is_required BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT merit_item_has_target CHECK (
         (count IS NOT NULL) OR (scale_value_id IS NOT NULL)
@@ -530,7 +523,6 @@ CREATE INDEX idx_merit_items_deed_item ON merit_items(deed_item_id);
 
 **Key Improvements:**
 - Renamed `merit_items_id` to `merit_item_id` for consistency
-- Added `is_required` for optional items in OR-type merits
 - CHECK constraint ensures target is defined
 - Links to `scale_value_id` instead of generic `scale` string
 
@@ -545,23 +537,20 @@ CREATE TABLE targets (
     user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
     description TEXT,
-    start_date DATE NOT NULL,
     end_date DATE,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP WITH TIME ZONE,
-    CONSTRAINT valid_date_range CHECK (end_date IS NULL OR end_date >= start_date)
+    CONSTRAINT target_end_date_when_inactive CHECK (is_active = TRUE OR end_date IS NOT NULL)
 );
 
 -- Indexes
 CREATE INDEX idx_targets_user ON targets(user_id, is_active);
-CREATE INDEX idx_targets_dates ON targets(start_date, end_date) WHERE is_active = TRUE;
 CREATE INDEX idx_targets_active ON targets(is_active, user_id) WHERE is_active = TRUE;
 ```
 
 **Key Improvements:**
-- Added `completed_at` for tracking completion
-- CHECK constraint validates date range
+- Added `end_date` for tracking target completion
+- CHECK constraint ensures `end_date` is set when `is_active = FALSE`
 - Indexes for active target queries
 
 ---
@@ -576,7 +565,6 @@ CREATE TABLE target_items (
     deed_item_id BIGINT NOT NULL REFERENCES deed_items(deed_item_id) ON DELETE RESTRICT,
     count DECIMAL(10,2), -- Target count
     scale_value_id BIGINT REFERENCES scale_values(scale_value_id), -- Target scale value
-    is_required BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT target_item_has_target CHECK (
         (count IS NOT NULL) OR (scale_value_id IS NOT NULL)
@@ -606,14 +594,11 @@ CREATE TABLE user_preferences (
     user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE UNIQUE,
     language VARCHAR(10) DEFAULT 'en',
     date_format VARCHAR(20) DEFAULT 'YYYY-MM-DD',
-    timezone VARCHAR(50) DEFAULT 'UTC',
     theme VARCHAR(20) DEFAULT 'light',
-    email_notifications_enabled BOOLEAN DEFAULT TRUE,
-    push_notifications_enabled BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_user_preferences_user ON user_preferences(user_id);
+-- Note: The UNIQUE constraint on user_id automatically creates an index
 ```
 
 ---
@@ -661,13 +646,12 @@ CREATE INDEX idx_audit_date ON audit_log(created_at DESC);
 
 ### 3. **Scalability Enhancements**
 - **Hard Deletes:** Use `DELETE` statements for permanent removal (saves space)
-- **Versioning:** Scales and permissions support versioning
+- **Versioning:** Scales support versioning for evolving scale definitions
 - **Partitioning Ready:** Entry tables structured for future date-based partitioning
 - **Normalized Scale Values:** New `scale_values` table for better scale management
 
 ### 4. **Flexibility & Extensibility**
 - **Metadata Fields:** `description` fields for future use
-- **Thread Support:** Messages table supports conversation threading
 - **User Preferences:** New table for extensible user settings
 - **Audit Log:** System-wide audit trail for compliance
 
@@ -679,9 +663,8 @@ CREATE INDEX idx_audit_date ON audit_log(created_at DESC);
 ### 6. **Missing Features Added**
 - **Email Verification:** `email_verified` flag
 - **Account Management:** `is_active`, `last_login_at`
-- **Completion Tracking:** `completed_at` for merits and targets
-- **Timezone Support:** Notifications and preferences support timezones
-- **Read Tracking:** Messages have `read_at` timestamp
+- **Completion Tracking:** `end_date` for merits and targets with constraint ensuring it's set when inactive
+- **Timezone Support:** Notifications support timezones for accurate scheduling
 
 ### 7. **Naming Consistency**
 - All IDs follow `table_name_id` pattern
