@@ -28,6 +28,10 @@ CREATE TABLE users (
     email_verified BOOLEAN DEFAULT FALSE,
     two_factor_enabled BOOLEAN DEFAULT FALSE,
     last_login_at TIMESTAMP WITH TIME ZONE,
+    -- User preferences (merged from user_preferences table)
+    language VARCHAR(10) DEFAULT 'en',
+    theme VARCHAR(20) DEFAULT 'light',
+    timezone VARCHAR(50) DEFAULT 'UTC',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -44,6 +48,7 @@ CREATE INDEX idx_users_gender_age ON users(gender, date_of_birth);
 - Added `email_verified` for account security
 - Added `two_factor_enabled` for 2FA status tracking
 - Added `last_login_at` for analytics
+- **Merged user preferences** into users table (1:1 relationship, always needed together)
 - ENUM type for gender ensures data integrity
 - Unique constraint on email
 - Indexes on gender and date_of_birth for admin filtering and analytics
@@ -585,22 +590,6 @@ CREATE INDEX idx_target_items_deed_item ON target_items(deed_item_id);
 
 ## Additional Tables for Extensibility
 
-### 17. USER_PREFERENCES (New)
-**Purpose:** Store user settings and preferences.
-
-```sql
-CREATE TABLE user_preferences (
-    preference_id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE UNIQUE,
-    language VARCHAR(10) DEFAULT 'en',
-    date_format VARCHAR(20) DEFAULT 'YYYY-MM-DD',
-    theme VARCHAR(20) DEFAULT 'light',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Note: The UNIQUE constraint on user_id automatically creates an index
-```
-
 ---
 
 ### 18. AUDIT_LOG (New)
@@ -652,7 +641,7 @@ CREATE INDEX idx_audit_date ON audit_log(created_at DESC);
 
 ### 4. **Flexibility & Extensibility**
 - **Metadata Fields:** `description` fields for future use
-- **User Preferences:** New table for extensible user settings
+- **User Preferences:** Merged into users table (1:1 relationship, simpler queries)
 - **Audit Log:** System-wide audit trail for compliance
 
 ### 5. **Relationship Improvements**

@@ -53,7 +53,7 @@ Kitaab is a personal accountability application designed to help users track the
 3. User creates first deed → deeds table (category_type: hasanaat/saiyyiaat)
 4. User adds deed items → deed_items table (hierarchical structure)
 5. User defines scale → scales + scale_values tables
-6. User sets preferences → user_preferences table
+6. User sets preferences → users table (preferences merged)
 ```
 
 ### Daily Entry Workflow
@@ -99,7 +99,7 @@ Kitaab is a personal accountability application designed to help users track the
 users (1) ──< (N) deeds
 users (1) ──< (N) relations (as requester)
 users (1) ──< (N) relations (as requestee)
-users (1) ──< (1) user_preferences
+-- Preferences merged into users table
 users (1) ──< (N) entries
 users (1) ──< (N) reflection_messages
 users (1) ──< (N) notifications
@@ -197,8 +197,8 @@ Tree structures use explicit parent references:
 #### 5. Normalization Pattern
 Eliminates redundancy:
 - `scale_values`: Normalized scale options (replaces string storage)
-- `user_preferences`: Extracted from users table
 - `permissions`: Linked through relations (not direct user pairs)
+- **Note:** User preferences merged into users table (1:1 relationship, simpler queries)
 
 ### Data Types Strategy
 
@@ -906,8 +906,7 @@ ALTER TABLE users ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE;
 -- Create scale_values table
 CREATE TABLE scale_values (...);
 
--- Create user_preferences table
-CREATE TABLE user_preferences (...);
+-- Note: User preferences are now in users table (merged for simplicity)
 
 -- Create audit_log table
 CREATE TABLE audit_log (...);
